@@ -140,7 +140,7 @@
   <div id="ai-section" class="cards"></div>
 
   <h2>Mentions Scoreboard</h2>
-  <p class="sub">Brand mentions across Hacker News, Reddit, Bluesky and Google News. Share of voice for Teleport vs. the battlecard field.</p>
+  <p class="sub">Brand mentions across Hacker News, Reddit, Bluesky, Google News and YouTube. Share of voice for Teleport vs. the competitive field.</p>
   <div id="m-tiles" class="tiles"></div>
   <div class="cards">
     <div class="card">
@@ -238,7 +238,7 @@ document.getElementById("m-tiles").innerHTML =
   tile("Total mentions collected", totalMentions.toLocaleString()) +
   tile("Teleport Health mentions", totals[SELF] || 0, (totals[SELF]||0) === 0 ? "pre-launch baseline" : "") +
   tile("Most mentioned brand", brandTotals[0] ? brandTotals[0][0] : "—", brandTotals[0] ? brandTotals[0][1] + " mentions" : "") +
-  tile("Sources live", Object.keys(D.mentions.by_source).length ? new Set(D.mentions.latest.map(m=>m.source)).size : 0, "HN · Reddit · Bluesky · News");
+  tile("Sources live", sources.length, "of HN · Reddit · Bluesky · News · YouTube");
 
 // Weekly line: Teleport + top 5 competitors (fixed set & colors per build).
 const weeks = Object.keys(D.mentions.weekly).sort().slice(-16);
