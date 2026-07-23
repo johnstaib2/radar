@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teleport Radar</title>
+<script src="vendor/chart.umd.min.js"></script>
+<script src="data.js"></script>
+<style>
+  @font-face {
+    font-family: "Caveat";
+    font-weight: 700;
+    font-display: swap;
+    src: url("vendor/caveat-700.woff2") format("woff2");
+  }
+  /* Teleport Health brand tokens: teal-cyan primary hsl(190 75% 45%),
+     orange accent hsl(25 95% 55%), slate-blue dark ground hsl(220 20% 10%). */
+  :root {
+    color-scheme: light;
+    --page:        #f6f9fa;
+    --surface-1:   #ffffff;
+    --text-primary:#20242c;
+    --text-secondary:#4c5462;
+    --muted:       #7d8694;
+    --grid:        #e3e8ec;
+    --baseline:    #c2cbd2;
+    --border:      rgba(32,36,44,0.10);
+    --accent:      #0e7d95;   /* teal, stepped for text contrast */
+    --accent-fill: #1dacc9;   /* teal at brand strength, for fills */
+    --pop:         #f97a1f;   /* brand orange — Teleport self-highlight only */
+    --pop-text:    #b35008;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page:        #14181f;
+      --surface-1:   #1d222c;
+      --text-primary:#f2f5f7;
+      --text-secondary:#b9c0cb;
+      --muted:       #8791a0;
+      --grid:        #2a303c;
+      --baseline:    #3a4250;
+      --border:      rgba(255,255,255,0.10);
+      --accent:      #2cc3e0;
+      --accent-fill: #2cc3e0;
+      --pop:         #f97a1f;
+      --pop-text:    #fb9a52;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page:        #14181f;
+    --surface-1:   #1d222c;
+    --text-primary:#f2f5f7;
+    --text-secondary:#b9c0cb;
+    --muted:       #8791a0;
+    --grid:        #2a303c;
+    --baseline:    #3a4250;
+    --border:      rgba(255,255,255,0.10);
+    --accent:      #2cc3e0;
+    --accent-fill: #2cc3e0;
+    --pop:         #f97a1f;
+    --pop-text:    #fb9a52;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header { padding: 30px 32px 8px; }
+  header h1 {
+    margin: 0; font-family: "Caveat", cursive; font-weight: 700;
+    font-size: 40px; line-height: 1; letter-spacing: 0.01em;
+  }
+  header h1 .radar { color: var(--accent); }
+  header .tagline { margin: 6px 0 0; color: var(--text-secondary); font-size: 13px; }
+  header .meta { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+  main { padding: 12px 32px 60px; max-width: 1280px; margin: 0 auto; }
+  h2 { font-size: 17px; margin: 36px 0 4px; }
+  h2 + p.sub { margin: 0 0 14px; color: var(--text-secondary); font-size: 13px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 12px; margin: 14px 0; }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .tile .label { color: var(--muted); font-size: 12px; }
+  .tile .value { font-size: 26px; font-weight: 650; margin-top: 2px; }
+  .tile .note  { color: var(--text-secondary); font-size: 12px; margin-top: 2px; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 920px) { .cards { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px 12px; min-width: 0;
+  }
+  .card h3 { margin: 0 0 2px; font-size: 14px; }
+  .card p.sub { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+  .card.wide { grid-column: 1 / -1; }
+  .chartbox { position: relative; height: 300px; }
+  details.tbl { margin-top: 8px; }
+  details.tbl summary { color: var(--muted); font-size: 12px; cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .chip {
+    display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 12px;
+    border: 1px solid var(--border); color: var(--text-secondary); background: transparent;
+    white-space: nowrap;
+  }
+  .chip.self { border-color: var(--pop); color: var(--pop-text); font-weight: 600; }
+  .chip.rec { border-color: #0ca30c; color: #0ca30c; }
+  .chip.neg { border-color: #d03b3b; color: #d03b3b; }
+  .swatch { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:6px; vertical-align:baseline; }
+  select {
+    background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border);
+    border-radius: 8px; padding: 5px 8px; font: inherit; font-size: 13px;
+  }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
+  .empty {
+    background: var(--surface-1); border: 1px dashed var(--baseline); border-radius: 10px;
+    padding: 22px; color: var(--text-secondary); font-size: 13px;
+  }
+  .answer { white-space: pre-wrap; background: var(--page); border: 1px solid var(--grid);
+    border-radius: 8px; padding: 12px 14px; font-size: 13px; margin: 8px 0 16px; max-height: 320px; overflow-y: auto; }
+  .matrix td.cell { text-align: center; font-variant-numeric: tabular-nums; border-radius: 4px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<header>
+  <h1>teleport <span class="radar">radar</span></h1>
+  <p class="tagline">We deal with the healthcare system so your family doesn't have to — this is where we check the world noticed.</p>
+  <p class="meta" id="generated"></p>
+</header>
+<main>
+  <h2>AI Recommendation Scoreboard</h2>
+  <p class="sub">Do ChatGPT, Claude, Gemini, Perplexity and Grok recommend Teleport Health (vs. competitors) when consumers ask about abusive bills, denials and medical paperwork? EN + ES prompt panel, web search on.</p>
+  <div id="ai-tiles" class="tiles"></div>
+  <div id="ai-section" class="cards"></div>
+
+  <h2>Mentions Scoreboard</h2>
+  <p class="sub">Brand mentions across Hacker News, Reddit, Bluesky and Google News. Share of voice for Teleport vs. the battlecard field.</p>
+  <div id="m-tiles" class="tiles"></div>
+  <div class="cards">
+    <div class="card">
+      <h3>Weekly mentions</h3>
+      <p class="sub">Teleport + most-mentioned competitors, last 16 weeks</p>
+      <div class="chartbox"><canvas id="c-weekly"></canvas></div>
+      <details class="tbl"><summary>Data table</summary><div id="t-weekly"></div></details>
+    </div>
+    <div class="card">
+      <h3>Total mentions by brand</h3>
+      <p class="sub">All time collected, top 12</p>
+      <div class="chartbox"><canvas id="c-totals"></canvas></div>
+      <details class="tbl"><summary>Data table</summary><div id="t-totals"></div></details>
+    </div>
+    <div class="card wide">
+      <h3>Mentions by source</h3>
+      <p class="sub">Top 10 brands, split by where they were mentioned</p>
+      <div class="chartbox"><canvas id="c-sources"></canvas></div>
+      <details class="tbl"><summary>Data table</summary><div id="t-sources"></div></details>
+    </div>
+    <div class="card wide">
+      <h3>Latest mentions</h3>
+      <p class="sub">Most recent 100 collected mentions</p>
+      <div class="filters">
+        <select id="f-brand"><option value="">All brands</option></select>
+        <select id="f-source"><option value="">All sources</option></select>
+      </div>
+      <div id="feed"></div>
+    </div>
+  </div>
+</main>
+<script>
+const D = window.RADAR_DATA;
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({
+  "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const SELF = "Teleport Health";
+// URL ?theme=dark|light for testing; viewer toggles stamp data-theme on <html>.
+const forced = new URLSearchParams(location.search).get("theme");
+if (forced) document.documentElement.dataset.theme = forced;
+const dark = () => {
+  const t = document.documentElement.dataset.theme;
+  if (t) return t === "dark";
+  return matchMedia("(prefers-color-scheme: dark)").matches;
+};
+
+// Categorical slots: validated reference palette (fixed order — never cycled).
+// brand/seq: Teleport teal, used for single-hue magnitude encodings only.
+const PAL = {
+  light: { cat: ["#2a78d6","#eb6834","#1baf7a","#eda100","#e87ba4","#008300"],
+           seq: ["#d3eef5","#a6dfec","#6fc9de","#2fadc9","#15869e","#0b657a"],
+           brand: "#1dacc9",
+           ink: "#20242c", muted: "#7d8694", grid: "#e3e8ec", surface: "#ffffff" },
+  dark:  { cat: ["#3987e5","#d95926","#199e70","#c98500","#d55181","#008300"],
+           seq: ["#0b657a","#0f7d97","#15a0bf","#2cc3e0","#63d4ea","#9fe4f2"],
+           brand: "#2cc3e0",
+           ink: "#f2f5f7", muted: "#8791a0", grid: "#2a303c", surface: "#1d222c" },
+};
+const P = () => dark() ? PAL.dark : PAL.light;
+
+document.getElementById("generated").textContent =
+  "Data refreshed " + new Date(D.generated_at).toLocaleString();
+
+const tile = (label, value, note) =>
+  `<div class="tile"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div>${note ? `<div class="note">${esc(note)}</div>` : ""}</div>`;
+
+function miniTable(headers, rows) {
+  return `<table><thead><tr>${headers.map((h,i)=>`<th${i?` class="num"`:""}>${esc(h)}</th>`).join("")}</tr></thead><tbody>` +
+    rows.map(r=>`<tr>${r.map((c,i)=>`<td${i?` class="num"`:""}>${esc(c)}</td>`).join("")}</tr>`).join("") +
+    `</tbody></table>`;
+}
+
+let charts = [];
+function baseOpts() {
+  const p = P();
+  Chart.defaults.font.family = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+  Chart.defaults.color = p.muted;
+  return {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: "nearest", intersect: false },
+    plugins: { legend: { labels: { boxWidth: 10, boxHeight: 10, color: p.ink, usePointStyle: true, pointStyle: "rectRounded" } } },
+    scales: {
+      x: { grid: { display: false }, border: { color: p.grid }, ticks: { color: p.muted } },
+      y: { grid: { color: p.grid }, border: { display: false }, ticks: { color: p.muted }, beginAtZero: true },
+    },
+  };
+}
+
+/* ---------- Mentions ---------- */
+const totals = D.mentions.total;
+const brandTotals = Object.entries(totals).sort((a,b)=>b[1]-a[1]);
+const totalMentions = brandTotals.reduce((s,[,c])=>s+c, 0);
+const sources = [...new Set(D.mentions.latest.map(m=>m.source))].sort();
+
+document.getElementById("m-tiles").innerHTML =
+  tile("Total mentions collected", totalMentions.toLocaleString()) +
+  tile("Teleport Health mentions", totals[SELF] || 0, (totals[SELF]||0) === 0 ? "pre-launch baseline" : "") +
+  tile("Most mentioned brand", brandTotals[0] ? brandTotals[0][0] : "—", brandTotals[0] ? brandTotals[0][1] + " mentions" : "") +
+  tile("Sources live", Object.keys(D.mentions.by_source).length ? new Set(D.mentions.latest.map(m=>m.source)).size : 0, "HN · Reddit · Bluesky · News");
+
+// Weekly line: Teleport + top 5 competitors (fixed set & colors per build).
+const weeks = Object.keys(D.mentions.weekly).sort().slice(-16);
+const lineBrands = [SELF, ...brandTotals.filter(([b])=>b!==SELF).slice(0,5).map(([b])=>b)];
+
+function renderCharts() {
+  charts.forEach(c=>c.destroy()); charts = [];
+  const p = P();
+
+  charts.push(new Chart(document.getElementById("c-weekly"), {
+    type: "line",
+    data: { labels: weeks, datasets: lineBrands.map((b,i)=>({
+      label: b, data: weeks.map(w=>D.mentions.weekly[w]?.[b] || 0),
+      borderColor: p.cat[i], backgroundColor: p.cat[i],
+      borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: 0.25,
+    }))},
+    options: baseOpts(),
+  }));
+
+  const top12 = brandTotals.slice(0,12);
+  const barOpts = baseOpts();
+  barOpts.indexAxis = "y";
+  barOpts.plugins.legend.display = false;
+  barOpts.scales = {
+    x: { grid: { color: p.grid }, border: { display: false }, ticks: { color: p.muted }, beginAtZero: true },
+    y: { grid: { display: false }, border: { color: p.grid }, ticks: { color: p.ink } },
+  };
+  charts.push(new Chart(document.getElementById("c-totals"), {
+    type: "bar",
+    data: { labels: top12.map(([b])=>b), datasets: [{
+      data: top12.map(([,c])=>c), backgroundColor: p.brand,
+      borderRadius: 4, maxBarThickness: 18,
+    }]},
+    options: barOpts,
+  }));
+
+  const top10 = brandTotals.slice(0,10).map(([b])=>b);
+  const stackOpts = baseOpts();
+  stackOpts.indexAxis = "y";
+  stackOpts.scales = {
+    x: { stacked: true, grid: { color: p.grid }, border: { display: false }, ticks: { color: p.muted }, beginAtZero: true },
+    y: { stacked: true, grid: { display: false }, border: { color: p.grid }, ticks: { color: p.ink } },
+  };
+  charts.push(new Chart(document.getElementById("c-sources"), {
+    type: "bar",
+    data: { labels: top10, datasets: sources.map((s,i)=>({
+      label: s, data: top10.map(b=>D.mentions.by_source[b]?.[s] || 0),
+      backgroundColor: p.cat[i % p.cat.length],
+      borderColor: p.surface, borderWidth: 1, borderRadius: 3, maxBarThickness: 18,
+    }))},
+    options: stackOpts,
+  }));
+
+  renderAiTrend();
+}
+
+document.getElementById("t-weekly").innerHTML =
+  miniTable(["Week", ...lineBrands], weeks.map(w=>[w, ...lineBrands.map(b=>D.mentions.weekly[w]?.[b] || 0)]));
+document.getElementById("t-totals").innerHTML =
+  miniTable(["Brand","Mentions"], brandTotals.slice(0,12));
+document.getElementById("t-sources").innerHTML =
+  miniTable(["Brand", ...sources], brandTotals.slice(0,10).map(([b])=>[b, ...sources.map(s=>D.mentions.by_source[b]?.[s] || 0)]));
+
+// Feed
+const fBrand = document.getElementById("f-brand");
+const fSource = document.getElementById("f-source");
+brandTotals.forEach(([b])=>fBrand.insertAdjacentHTML("beforeend", `<option>${esc(b)}</option>`));
+sources.forEach(s=>fSource.insertAdjacentHTML("beforeend", `<option>${esc(s)}</option>`));
+function renderFeed() {
+  const rows = D.mentions.latest
+    .filter(m => (!fBrand.value || m.brand === fBrand.value) && (!fSource.value || m.source === fSource.value))
+    .slice(0, 100);
+  document.getElementById("feed").innerHTML = rows.length ? `<table><thead>
+    <tr><th>Date</th><th>Brand</th><th>Source</th><th>Mention</th></tr></thead><tbody>` +
+    rows.map(m=>`<tr>
+      <td style="white-space:nowrap">${esc((m.published||"").slice(0,10))}</td>
+      <td><span class="chip ${m.brand===SELF?"self":""}">${esc(m.brand)}</span></td>
+      <td>${esc(m.source)}</td>
+      <td><a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.title || (m.snippet||"").slice(0,120) || m.url)}</a></td>
+    </tr>`).join("") + "</tbody></table>" : `<div class="empty">No mentions match this filter.</div>`;
+}
+fBrand.onchange = fSource.onchange = renderFeed;
+renderFeed();
+
+/* ---------- AI recommendations ---------- */
+const runs = Object.keys(D.ai_recs.daily).sort();
+const aiTiles = document.getElementById("ai-tiles");
+const aiSection = document.getElementById("ai-section");
+
+function rateCellStyle(rate) {
+  if (!rate) return "";
+  const p = P();
+  const idx = Math.min(p.seq.length - 1, Math.floor(rate * p.seq.length));
+  const bg = p.seq[idx];
+  const inkDark = dark() ? idx >= 3 : idx < 3;
+  return `background:${bg};color:${inkDark ? "#0b0b0b" : "#ffffff"}`;
+}
+
+function renderAiTrend() {
+  const canvas = document.getElementById("c-ai-trend");
+  if (!canvas || !runs.length) return;
+  const p = P();
+  const providers = [...new Set(runs.flatMap(d=>Object.keys(D.ai_recs.daily[d].answered)))];
+  charts.push(new Chart(canvas, {
+    type: "line",
+    data: { labels: runs, datasets: providers.map((pr,i)=>({
+      label: pr,
+      data: runs.map(d=>{
+        const day = D.ai_recs.daily[d];
+        const n = day.answered[pr] || 0;
+        const rec = day.brands[pr]?.[SELF]?.rec || 0;
+        return n ? +(100*rec/n).toFixed(1) : null;
+      }),
+      borderColor: p.cat[i % p.cat.length], backgroundColor: p.cat[i % p.cat.length],
+      borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, tension: 0.25, spanGaps: true,
+    }))},
+    options: (()=>{ const o = baseOpts();
+      o.scales.y.max = 100;
+      o.scales.y.ticks.callback = v => v + "%";
+      o.plugins.tooltip = { callbacks: { label: c => ` ${c.dataset.label}: ${c.parsed.y}% of answers recommend Teleport` } };
+      return o; })(),
+  }));
+}
+
+if (!runs.length) {
+  aiTiles.innerHTML =
+    tile("AI runs collected", 0) + tile("Teleport recommended", "—") +
+    tile("Teleport mentioned", "—") + tile("Providers live", "—");
+  aiSection.innerHTML = `<div class="empty card wide" style="grid-column:1/-1">
+    No AI recommendation runs yet. Add provider API keys to <code>.env</code> (or GitHub secrets) and run
+    <code>python collectors/ai_recs.py</code> — results will appear here on the next dashboard build.</div>`;
+} else {
+  const latest = D.ai_recs.latest;
+  const cells = latest.cells.filter(c=>c.answer);
+  const nAnswers = cells.length;
+  const recN = cells.filter(c=>(c.judge?.brands||[]).some(b=>b.name===SELF && b.stance==="recommended")).length;
+  const menN = cells.filter(c=>(c.judge?.brands||[]).some(b=>b.name===SELF)).length;
+  const provs = [...new Set(cells.map(c=>c.provider_label))];
+
+  aiTiles.innerHTML =
+    tile("Teleport recommended", `${recN}/${nAnswers}`, `latest run ${latest.date}`) +
+    tile("Teleport mentioned", `${menN}/${nAnswers}`, "any stance") +
+    tile("Providers live", provs.length, provs.join(" · ")) +
+    tile("Runs collected", runs.length, `${runs[0]} → ${runs[runs.length-1]}`);
+
+  // Matrix: brand × provider rec counts (latest run)
+  const brandRec = {};
+  cells.forEach(c => (c.judge?.brands||[]).forEach(b => {
+    brandRec[b.name] = brandRec[b.name] || {};
+    const cell = brandRec[b.name][c.provider_label] = brandRec[b.name][c.provider_label] || {rec:0, men:0};
+    cell.men++; if (b.stance === "recommended") cell.rec++;
+  }));
+  const matrixBrands = [SELF, ...Object.keys(brandRec).filter(b=>b!==SELF)
+    .sort((a,b)=>{
+      const t = n => Object.values(brandRec[n]).reduce((s,c)=>s+c.rec,0);
+      return t(b)-t(a);
+    }).slice(0,12)];
+  const perProv = {};
+  cells.forEach(c => perProv[c.provider_label] = (perProv[c.provider_label]||0)+1);
+
+  const matrixHtml = `<table class="matrix"><thead><tr><th>Brand</th>${provs.map(pr=>`<th class="num">${esc(pr)}</th>`).join("")}</tr></thead><tbody>` +
+    matrixBrands.map(b=>`<tr><td><span class="chip ${b===SELF?"self":""}">${esc(b)}</span></td>` +
+      provs.map(pr=>{
+        const cell = brandRec[b]?.[pr];
+        const n = perProv[pr] || 0;
+        if (!cell || !n) return `<td class="cell" style="color:var(--muted)">·</td>`;
+        return `<td class="cell" style="${rateCellStyle(cell.rec/n)}" title="${cell.rec} recommended / ${cell.men} mentioned in ${n} answers">${cell.rec}</td>`;
+      }).join("") + "</tr>").join("") + "</tbody></table>";
+
+  const domains = D.ai_recs.cited_domains_top || [];
+  const domainsHtml = domains.length
+    ? `<table><thead><tr><th>Domain</th><th class="num">Citations</th><th>Example page</th></tr></thead><tbody>` +
+      domains.map(d=>`<tr><td>${esc(d.domain)}</td><td class="num">${d.count}</td>
+        <td><a href="${esc(d.example_url)}" target="_blank" rel="noopener">${esc(d.example_title || d.example_url).slice(0,80)}</a></td></tr>`).join("") +
+      "</tbody></table>"
+    : `<div class="empty">No citations captured yet.</div>`;
+
+  const otherHtml = D.ai_recs.other_services_top.length
+    ? miniTable(["Untracked service recommended", "Count"],
+        D.ai_recs.other_services_top.map(o=>[o.name, o.count]))
+    : `<div class="empty">None yet.</div>`;
+
+  aiSection.innerHTML = `
+    <div class="card">
+      <h3>Recommendations by provider</h3>
+      <p class="sub">Latest run (${esc(latest.date)}): times each brand was recommended, out of ${esc(String(nAnswers))} answers. Hover a cell for detail.</p>
+      ${matrixHtml}
+    </div>
+    <div class="card">
+      <h3>Teleport recommendation rate</h3>
+      <p class="sub">% of a provider's answers that recommend Teleport Health, per run</p>
+      <div class="chartbox"><canvas id="c-ai-trend"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>Untracked services the AIs recommend</h3>
+      <p class="sub">Competitors we may not be tracking yet — consider adding to brands.yaml</p>
+      ${otherHtml}
+    </div>
+    <div class="card">
+      <h3>Where the AIs get their answers</h3>
+      <p class="sub">Most-cited domains across the latest runs — the PR target list: get Teleport into these pages</p>
+      ${domainsHtml}
+    </div>
+    <div class="card">
+      <h3>Answer browser</h3>
+      <p class="sub">Read exactly what each AI told the consumer</p>
+      <div class="filters">
+        <select id="ab-prov">${provs.map(pr=>`<option>${esc(pr)}</option>`).join("")}</select>
+        <select id="ab-prompt">${[...new Set(cells.map(c=>c.prompt_id))].map(x=>`<option>${esc(x)}</option>`).join("")}</select>
+        <select id="ab-lang"><option>en</option><option>es</option></select>
+      </div>
+      <div id="ab-out"></div>
+    </div>`;
+
+  const abProv = document.getElementById("ab-prov");
+  const abPrompt = document.getElementById("ab-prompt");
+  const abLang = document.getElementById("ab-lang");
+  function renderAnswer() {
+    const match = cells.filter(c => c.provider_label === abProv.value &&
+      c.prompt_id === abPrompt.value && c.lang === abLang.value);
+    document.getElementById("ab-out").innerHTML = match.length ? match.map(c=>`
+      <p class="sub" style="margin-top:8px"><strong>Q:</strong> ${esc(c.prompt_text)}</p>
+      <p style="margin:4px 0">${(c.judge?.brands||[]).map(b=>
+        `<span class="chip ${b.stance==="recommended"?"rec":b.stance==="negative"?"neg":""} ${b.name===SELF?"self":""}">${esc(b.name)} · ${esc(b.stance)}</span>`).join(" ") || '<span class="chip">no tracked brands named</span>'}</p>
+      <div class="answer">${esc(c.answer)}</div>
+      ${(c.sources||[]).length ? `<p class="sub">Sources cited: ${c.sources.map(s=>
+        `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title || new URL(s.url).hostname)}</a>`).join(" · ")}</p>` : ""}`).join("") :
+      `<div class="empty">No answer for this combination.</div>`;
+  }
+  abProv.onchange = abPrompt.onchange = abLang.onchange = renderAnswer;
+  renderAnswer();
+}
+
+renderCharts();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderCharts);
+new MutationObserver(renderCharts)
+  .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+</script>
+</body>
+</html>
